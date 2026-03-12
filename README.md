@@ -2,89 +2,108 @@
 
 ## WAV → Stem Separation → MIDI Conversion Platform
 
-Audio2MIDI Cloud is a cloud-native platform that converts audio files (WAV/MP3) into MIDI files using a distributed, decoupled microservices architecture.
+Audio2MIDI Cloud is a cloud-native platform that converts audio files (WAV/MP3) into MIDI files using a distributed, decoupled microservices architecture. It features a modern Web UI hosted globally on AWS CloudFront.
 
 ---
 
-## 🚀 Refined Architecture
+## 🚀 Architecture Highlights
 
-The system has been updated to follow the **AWS Well-Architected Framework** more closely:
+The system has been meticulously designed following the **AWS Well-Architected Framework**:
 
-1.  **Decoupled Pipeline:** Uses two separate SQS queues (`stem-jobs` and `midi-jobs`) to prevent worker contention and ensure smooth state transitions.
-2.  **Resource Optimization:** Upgraded to `t3a.medium` (AMD-based) to provide 4GB of RAM, ensuring AI libraries like `Demucs` and `Basic Pitch` don't crash due to memory limits.
-3.  **Enhanced Security:** S3 buckets now have explicit Public Access Blocks, and IAM roles follow the principle of least privilege.
-4.  **Cost Efficiency:** Uses S3 Lifecycle policies (24h deletion) and pay-per-request DynamoDB to keep the footprint minimal.
+1.  **Frontend & Delivery:** A beautiful, glassmorphism Web UI (`web-client/`) hosted on S3 and distributed globally via a **CloudFront CDN**. It acts as a secure reverse proxy to the backend API, eliminating Mixed Content errors.
+2.  **Decoupled Pipeline:** Uses two separate SQS queues (`stem-jobs` and `midi-jobs`) to orchestrate the AI microservices asynchronously, preventing worker contention and timeout crashes.
+3.  **Cost Efficiency:** Uses S3 Lifecycle policies (24h deletion) and pay-per-request DynamoDB. Total AWS cost is estimated at ~$20/month.
+4.  **Monitoring & Alarms:** Equipped with **CloudWatch Alarms** tied to SNS to email administrators if the monthly bill exceeds $40 or if the CloudFront CDN experiences >5% 5xx Error rates.
+5.  **CI/CD Pipeline:** Fully automated deployments using **GitHub Actions**. Pushing to `main` securely authenticates with Docker Hub using repository secrets, builds the multi-architecture images, and pushes them for the Kubernetes cluster to pull.
 
 ---
 
 ## 🏗 System Workflow
 
-```text
-      User
-        |
-   API Service (FastAPI)
-        |
-   1. Upload to S3 (Input Bucket)
-   2. Push to 'stem-jobs' SQS
-        |
-   Stem Service (Worker)
-        |
-   1. Pull from 'stem-jobs'
-   2. Run Demucs (AI Split)
-   3. Upload Stems to S3
-   4. Push to 'midi-jobs' SQS
-        |
-   MIDI Service (Worker)
-        |
-   1. Pull from 'midi-jobs'
-   2. Run Basic Pitch (AI MIDI)
-   3. Upload MIDI to S3 (Output Bucket)
-   4. Mark Job COMPLETE in DynamoDB
+```mermaid
+graph TD
+    A[User Web Client] -->|HTTPS POST| B(CloudFront CDN Reverse Proxy)
+    B -->|HTTP| C{FastAPI Service}
+    
+    C -->|1. Upload| D[(S3 Input Bucket)]
+    C -->|2. Queue| E[[SQS 'stem-jobs']]
+    
+    E --> F[Demucs Stem Worker]
+    F -->|3. Split & Upload| G[(S3 Stems)]
+    F -->|4. Queue| H[[SQS 'midi-jobs']]
+    
+    H --> I[Basic Pitch MIDI Worker]
+    I -->|5. Predict & Upload| J[(S3 MIDI Output)]
+    I -->|6. Status Update| K[(DynamoDB)]
+    
+    A -.->|Polling| C
+    C -.->|Status + Presigned URLs| K
 ```
 
 ---
 
-## 💰 Monthly Cost Estimation (Approx. $20 USD)
+## 💰 Monthly Cost Estimation
 
 | Service | Component | Estimated Cost |
 | :--- | :--- | :--- |
 | **EC2** | `t3a.medium` (4GB RAM) | ~$13.50 |
 | **EBS** | 50GB GP3 Storage | ~$4.00 |
-| **S3** | Storage & API | ~$0.50 |
+| **CloudFront** | Global CDN | $0.00 (Free Tier) |
+| **S3** | Storage & Web Hosting | ~$0.50 |
 | **SQS** | Messaging | $0.00 (Free Tier) |
 | **DynamoDB** | Metadata | $0.00 (Free Tier) |
 | **Total** | | **~$18.00 - $20.00** |
 
 ---
 
+## 💻 Included Tools
+
+### Web UI
+Located in `web-client/`, simply open `index.html` locally or visit your deployed CloudFront URL. It provides drag-and-drop uploads, real-time polling progress bars, and dynamic presigned S3 download buttons.
+
+### Auto Downloader
+A Python CLI tool located in `tools/auto_download.py` designed for rapid headless testing:
+```bash
+python3 tools/auto_download.py <path_to_audio_file>.wav
+```
+*Automatically uploads, polls, and downloads all 4 returning Stem and MIDI files to a folder in `~/Downloads`.*
+
+---
+
 ## 🐳 Deployment Guide
 
-### 1. Build Multi-Platform Images
-Since the EC2 instance is `amd64`, you must build images for that platform:
+### 1. CI/CD (Recommended)
+Simply push to the `main` branch. The `.github/workflows/deploy.yml` pipeline will automatically build and push the `api-service`, `stem-service`, and `midi-service` images to Docker Hub.
 
-```bash
-docker buildx build --platform linux/amd64 -t rexby117/api_service:latest ./services/api_service --push
-docker buildx build --platform linux/amd64 -t rexby117/stem_service:latest ./services/stem_service --push
-docker buildx build --platform linux/amd64 -t rexby117/midi_service:latest ./services/midi_service --push
-```
+*Requires `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets configured in your GitHub repository.*
 
 ### 2. Infrastructure
+
 ```bash
 cd terraform
 terraform init
 terraform apply
 ```
 
-### 3. Kubernetes
-Update `k8s/config.yaml` with the outputs from Terraform, then:
+### 3. Kubernetes Local Config
+
+Update `k8s/config.yaml` with the outputs from Terraform, then apply to the remote cluster:
+
 ```bash
 KUBECONFIG=kubeconfig.yaml kubectl apply -f k8s/
+```
+
+### 4. Deploy Frontend
+
+```bash
+aws s3 sync web-client/ s3://<YOUR_WEB_BUCKET_NAME>
+aws cloudfront create-invalidation --distribution-id <YOUR_DISTRIBUTION_ID> --paths "/*"
 ```
 
 ---
 
 ## 🛠 Tech Stack
-- **Infrastructure:** Terraform, Kubernetes (k3s on EC2)
+- **Infrastructure:** Terraform, AWS (S3, CloudFront, CloudWatch, SQS, DynamoDB), Kubernetes (k3s on EC2)
 - **AI/ML:** Demucs (Meta), Basic Pitch (Spotify)
-- **Backend:** FastAPI, Boto3
-- **Cloud:** AWS (S3, SQS, DynamoDB, IAM)
+- **Backend:** Python, FastAPI, Boto3, Docker
+- **Frontend:** Vanilla HTML/CSS/JS (Glassmorphism design)
