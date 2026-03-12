@@ -25,7 +25,8 @@ resource "aws_cloudfront_origin_access_control" "oac" {
 }
 
 locals {
-  s3_origin_id = "myS3Origin"
+  s3_origin_id  = "myS3Origin"
+  api_origin_id = "myApiOrigin"
 }
 
 resource "aws_cloudfront_distribution" "web_distribution" {
@@ -33,6 +34,18 @@ resource "aws_cloudfront_distribution" "web_distribution" {
     domain_name              = aws_s3_bucket.web_client.bucket_regional_domain_name
     origin_access_control_id = aws_cloudfront_origin_access_control.oac.id
     origin_id                = local.s3_origin_id
+  }
+
+  origin {
+    domain_name = aws_instance.k3s_node.public_dns
+    origin_id   = local.api_origin_id
+
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "http-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
   }
 
   enabled             = true
@@ -55,6 +68,46 @@ resource "aws_cloudfront_distribution" "web_distribution" {
     min_ttl                = 0
     default_ttl            = 3600
     max_ttl                = 86400
+  }
+
+  ordered_cache_behavior {
+    path_pattern     = "/upload"
+    allowed_methods  = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = local.api_origin_id
+
+    forwarded_values {
+      query_string = true
+      headers      = ["*"]
+      cookies {
+        forward = "all"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 0
+    max_ttl                = 0
+  }
+
+  ordered_cache_behavior {
+    path_pattern     = "/status/*"
+    allowed_methods  = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = local.api_origin_id
+
+    forwarded_values {
+      query_string = true
+      headers      = ["*"]
+      cookies {
+        forward = "all"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 0
+    max_ttl                = 0
   }
 
   restrictions {

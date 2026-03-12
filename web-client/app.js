@@ -1,4 +1,4 @@
-const API_URL = "http://52.70.122.89";
+const API_URL = "";
 
 // UI Elements
 const dropZone = document.getElementById("drop-zone");
