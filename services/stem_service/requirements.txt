@@ -1,0 +1,4 @@
+demucs
+boto3
+torch
+numpy

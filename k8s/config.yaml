@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: audio2midi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: audio2midi-config
+  namespace: audio2midi
+data:
+  AWS_REGION: "us-east-1"
+  INPUT_BUCKET: "audio2midi-input-20260311174609944300000002"
+  OUTPUT_BUCKET: "audio2midi-output-20260311174609943000000001"
+  STEM_QUEUE_URL: "https://sqs.us-east-1.amazonaws.com/107759015501/audio2midi-stem-jobs"
+  MIDI_QUEUE_URL: "https://sqs.us-east-1.amazonaws.com/107759015501/audio2midi-midi-jobs"
+  DYNAMODB_TABLE: "audio2midi-jobs"

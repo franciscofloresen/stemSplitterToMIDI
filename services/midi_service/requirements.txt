@@ -1,0 +1,5 @@
+basic-pitch
+boto3
+torch
+librosa
+numpy

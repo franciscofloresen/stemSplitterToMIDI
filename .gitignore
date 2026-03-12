@@ -1,0 +1,28 @@
+# Sensitive credentials
+*.pem
+kubeconfig.yaml
+
+# Terraform
+terraform/.terraform/
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/.terraform.lock.hcl
+
+# Docker image tarballs
+*.tar
+
+# Audio test files
+*.wav
+*.mp3
+*.flac
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# OS
+.DS_Store

@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stem-worker
+  namespace: audio2midi
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stem-worker
+  template:
+    metadata:
+      labels:
+        app: stem-worker
+    spec:
+      containers:
+      - name: stem-worker
+        image: audio2midi/stem_service:latest
+        imagePullPolicy: IfNotPresent
+        env:
+          - name: AWS_REGION
+            valueFrom: { configMapKeyRef: { name: audio2midi-config, key: AWS_REGION } }
+          - name: INPUT_BUCKET
+            valueFrom: { configMapKeyRef: { name: audio2midi-config, key: INPUT_BUCKET } }
+          - name: STEM_QUEUE_URL
+            valueFrom: { configMapKeyRef: { name: audio2midi-config, key: STEM_QUEUE_URL } }
+          - name: MIDI_QUEUE_URL
+            valueFrom: { configMapKeyRef: { name: audio2midi-config, key: MIDI_QUEUE_URL } }
+          - name: DYNAMODB_TABLE
+            valueFrom: { configMapKeyRef: { name: audio2midi-config, key: DYNAMODB_TABLE } }
+          - name: PYTHONUNBUFFERED
+            value: "1"
+        resources:
+          limits:
+            cpu: "1500m"
+            memory: "3Gi"
+          requests:
+            cpu: "1000m"
+            memory: "2Gi"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: midi-worker
+  namespace: audio2midi
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: midi-worker
+  template:
+    metadata:
+      labels:
+        app: midi-worker
+    spec:
+      containers:
+      - name: midi-worker
+        image: audio2midi/midi_service:latest
+        imagePullPolicy: IfNotPresent
+        env:
+          - name: AWS_REGION
+            valueFrom: { configMapKeyRef: { name: audio2midi-config, key: AWS_REGION } }
+          - name: INPUT_BUCKET
+            valueFrom: { configMapKeyRef: { name: audio2midi-config, key: INPUT_BUCKET } }
+          - name: OUTPUT_BUCKET
+            valueFrom: { configMapKeyRef: { name: audio2midi-config, key: OUTPUT_BUCKET } }
+          - name: PYTHONUNBUFFERED
+            value: "1"
+          - name: MIDI_QUEUE_URL
+            valueFrom: { configMapKeyRef: { name: audio2midi-config, key: MIDI_QUEUE_URL } }
+          - name: DYNAMODB_TABLE
+            valueFrom: { configMapKeyRef: { name: audio2midi-config, key: DYNAMODB_TABLE } }
+        resources:
+          limits:
+            cpu: "1000m"
+            memory: "2Gi"
+          requests:
+            cpu: "500m"
+            memory: "1Gi"

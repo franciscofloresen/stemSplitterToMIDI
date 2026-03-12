@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-service
+  namespace: audio2midi
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-service
+  template:
+    metadata:
+      labels:
+        app: api-service
+    spec:
+      containers:
+      - name: api-service
+        image: audio2midi/api_service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+        env:
+          - name: AWS_REGION
+            valueFrom: { configMapKeyRef: { name: audio2midi-config, key: AWS_REGION } }
+          - name: INPUT_BUCKET
+            valueFrom: { configMapKeyRef: { name: audio2midi-config, key: INPUT_BUCKET } }
+          - name: OUTPUT_BUCKET
+            valueFrom: { configMapKeyRef: { name: audio2midi-config, key: OUTPUT_BUCKET } }
+          - name: STEM_QUEUE_URL
+            valueFrom: { configMapKeyRef: { name: audio2midi-config, key: STEM_QUEUE_URL } }
+          - name: DYNAMODB_TABLE
+            valueFrom: { configMapKeyRef: { name: audio2midi-config, key: DYNAMODB_TABLE } }
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-service
+  namespace: audio2midi
+spec:
+  selector:
+    app: api-service
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-ingress
+  namespace: audio2midi
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api-service
+                port:
+                  number: 80

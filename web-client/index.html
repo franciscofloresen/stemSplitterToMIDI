@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio2MIDI Studio</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="background-orbs">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+
+    <main class="container">
+        <header>
+            <h1>Audio<span>2</span>MIDI</h1>
+            <p>Next-Gen Stem Separation & MIDI Conversion</p>
+        </header>
+
+        <section class="upload-section glass-panel" id="upload-panel">
+            <div class="drop-zone" id="drop-zone">
+                <div class="drop-icon">
+                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                </div>
+                <h3>Drag & Drop Audio</h3>
+                <p>or click to browse (.wav, .mp3, .flac)</p>
+                <input type="file" id="file-input" accept=".wav,.mp3,.flac" hidden>
+            </div>
+            
+            <div class="selected-file" id="selected-file" style="display: none;">
+                <span id="file-name">filename.wav</span>
+                <button id="clear-btn" class="icon-btn">✕</button>
+            </div>
+
+            <button id="upload-btn" class="primary-btn" disabled>
+                <span>Extract MIDI</span>
+                <div class="loader-dots"></div>
+            </button>
+        </section>
+
+        <section class="status-section glass-panel hidden" id="status-panel">
+            <h2>Processing Track</h2>
+            <div class="progress-container">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+            </div>
+            
+            <ul class="status-steps">
+                <li id="step-queued" class="active">
+                    <span class="step-icon"></span>
+                    Queued
+                </li>
+                <li id="step-splitting">
+                    <span class="step-icon"></span>
+                    Separating Stems (Demucs)
+                </li>
+                <li id="step-converting">
+                    <span class="step-icon"></span>
+                    Extracting MIDI
+                </li>
+            </ul>
+
+            <p id="status-message" class="status-text">Uploading file...</p>
+        </section>
+
+        <section class="results-section glass-panel hidden" id="results-panel">
+            <h2>Extraction Complete 🎉</h2>
+            
+            <div class="download-grid">
+                <div class="download-card">
+                    <h3>Vocals</h3>
+                    <div class="button-group">
+                        <a id="dl-vocals-wav" href="#" class="btn-stem" target="_blank" download>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+                            Stem
+                        </a>
+                        <a id="dl-vocals-midi" href="#" class="btn-midi" target="_blank" download>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect><line x1="8" y1="2" x2="8" y2="22"></line><line x1="16" y1="2" x2="16" y2="22"></line><line x1="12" y1="2" x2="12" y2="22"></line></svg>
+                            MIDI
+                        </a>
+                    </div>
+                </div>
+                
+                <div class="download-card">
+                    <h3>Instrumental</h3>
+                    <div class="button-group">
+                        <a id="dl-inst-wav" href="#" class="btn-stem" target="_blank" download>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+                            Stem
+                        </a>
+                        <a id="dl-inst-midi" href="#" class="btn-midi" target="_blank" download>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect><line x1="8" y1="2" x2="8" y2="22"></line><line x1="16" y1="2" x2="16" y2="22"></line><line x1="12" y1="2" x2="12" y2="22"></line></svg>
+                            MIDI
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <button id="reset-btn" class="secondary-btn">Process Another Track</button>
+        </section>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
