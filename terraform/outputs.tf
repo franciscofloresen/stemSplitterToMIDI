@@ -21,3 +21,7 @@ output "dynamodb_table" {
 output "public_ip" {
   value = aws_instance.k3s_node.public_ip
 }
+
+output "cloudfront_url" {
+  value = "https://${aws_cloudfront_distribution.web_distribution.domain_name}"
+}

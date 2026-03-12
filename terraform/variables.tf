@@ -15,3 +15,15 @@ variable "allowed_cidr" {
   type        = string
   default     = "0.0.0.0/0"
 }
+
+variable "alarm_email" {
+  description = "Email address for CloudWatch billing and error alerts"
+  type        = string
+  default     = "franciscofloresenr@gmail.com"
+}
+
+variable "billing_threshold" {
+  description = "The dollar amount for the monthly billing alarm threshold"
+  type        = string
+  default     = "40"
+}
