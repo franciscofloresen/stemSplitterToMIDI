@@ -63,9 +63,9 @@ The system has been updated to follow the **AWS Well-Architected Framework** mor
 Since the EC2 instance is `amd64`, you must build images for that platform:
 
 ```bash
-docker buildx build --platform linux/amd64 -t audio2midi/api_service:latest ./services/api_service --push
-docker buildx build --platform linux/amd64 -t audio2midi/stem_service:latest ./services/stem_service --push
-docker buildx build --platform linux/amd64 -t audio2midi/midi_service:latest ./services/midi_service --push
+docker buildx build --platform linux/amd64 -t rexby117/api_service:latest ./services/api_service --push
+docker buildx build --platform linux/amd64 -t rexby117/stem_service:latest ./services/stem_service --push
+docker buildx build --platform linux/amd64 -t rexby117/midi_service:latest ./services/midi_service --push
 ```
 
 ### 2. Infrastructure

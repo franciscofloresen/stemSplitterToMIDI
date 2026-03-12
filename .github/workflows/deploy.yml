@@ -42,7 +42,7 @@ jobs:
         push: ${{ github.event_name != 'pull_request' }}
         # We'll tag it with 'latest' and the short git SHA for versioning
         tags: |
-          audio2midi/${{ matrix.service }}:latest
-          audio2midi/${{ matrix.service }}:${{ github.sha }}
+          rexby117/${{ matrix.service }}:latest
+          rexby117/${{ matrix.service }}:${{ github.sha }}
         cache-from: type=gha
         cache-to: type=gha,mode=max

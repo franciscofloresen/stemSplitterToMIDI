@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: stem-worker
-        image: audio2midi/stem_service:latest
+        image: rexby117/stem_service:latest
         imagePullPolicy: IfNotPresent
         env:
           - name: AWS_REGION
@@ -55,7 +55,7 @@ spec:
     spec:
       containers:
       - name: midi-worker
-        image: audio2midi/midi_service:latest
+        image: rexby117/midi_service:latest
         imagePullPolicy: IfNotPresent
         env:
           - name: AWS_REGION
