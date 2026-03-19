@@ -28,10 +28,10 @@ graph TD
     C -->|1. Upload| D[(S3 Input Bucket)]
     C -->|2. Queue| E[[SQS 'stem-jobs']]
     
-    subgraph K3s Cluster on t4g.large (ARM64)
-    C
-    F[Demucs Stem Worker]
-    I[Basic Pitch MIDI Worker]
+    subgraph K3sCluster["K3s Cluster on t4g.large (ARM64)"]
+        C
+        F[Demucs Stem Worker]
+        I[Basic Pitch MIDI Worker]
     end
     
     E --> F
