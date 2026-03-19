@@ -67,6 +67,8 @@ graph TD
 ## 💻 Included Tools
 
 ### Web UI
+👉 **Live Demo: [https://d1390tdcv7v9ou.cloudfront.net](https://d1390tdcv7v9ou.cloudfront.net)**
+
 Located in `web-client/`, simply open `index.html` locally or visit your deployed CloudFront URL. It provides drag-and-drop uploads, real-time polling progress bars, and dynamic presigned S3 download buttons.
 
 ### Auto Downloader
