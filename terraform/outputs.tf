@@ -25,3 +25,11 @@ output "public_ip" {
 output "cloudfront_url" {
   value = "https://${aws_cloudfront_distribution.web_distribution.domain_name}"
 }
+
+output "web_bucket_name" {
+  value = aws_s3_bucket.web_client.id
+}
+
+output "cloudfront_distribution_id" {
+  value = aws_cloudfront_distribution.web_distribution.id
+}

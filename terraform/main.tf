@@ -155,6 +155,11 @@ resource "aws_iam_role_policy_attachment" "worker_attach" {
   policy_arn = aws_iam_policy.worker_access.arn
 }
 
+resource "aws_iam_role_policy_attachment" "worker_ssm_attach" {
+  role       = aws_iam_role.worker_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
 resource "aws_iam_instance_profile" "worker_profile" {
   name = "${var.project_name}-worker-profile"
   role = aws_iam_role.worker_role.name
@@ -195,11 +200,21 @@ resource "aws_security_group" "k3s_sg" {
   }
 }
 
-# --- 6. EC2 Instance (AMD-based for cost savings) --- #
+# --- 6. EC2 Instance (ARM-based Graviton for cost-effective memory) --- #
+
+data "aws_ami" "ubuntu_arm64" {
+  most_recent = true
+  owners      = ["099720109477"] # Canonical
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-arm64-server-*"]
+  }
+}
 
 resource "aws_instance" "k3s_node" {
-  ami                    = "ami-0c7217cdde317cfec" # Ubuntu 22.04 LTS (us-east-1)
-  instance_type          = "t3a.medium"             # 4GB RAM, cost-effective AMD
+  ami                    = data.aws_ami.ubuntu_arm64.id
+  instance_type          = "t4g.large"              # 8GB RAM, Graviton ARM64
   key_name               = "audio2midi-key"
   iam_instance_profile   = aws_iam_instance_profile.worker_profile.name
   vpc_security_group_ids = [aws_security_group.k3s_sg.id]
