@@ -48,6 +48,7 @@ jobs:
         context: ${{ matrix.path }}
         platforms: ${{ matrix.platform }}
         push: ${{ github.event_name != 'pull_request' }}
+        provenance: false
         tags: |
           rexby117/${{ matrix.service }}:latest
           rexby117/${{ matrix.service }}:${{ github.sha }}

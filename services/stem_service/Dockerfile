@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM pytorch/pytorch:2.1.2-cuda12.1-cudnn8-runtime
 
 # Install system dependencies for audio processing
 RUN apt-get update && apt-get install -y \
@@ -8,8 +8,6 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 COPY requirements.txt .
-# Install PyTorch with CUDA 12.1 for NVIDIA T4 GPU on g4dn.xlarge
-RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cu121
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY worker.py .
