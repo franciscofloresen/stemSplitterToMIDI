@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     
     strategy:
       matrix:
@@ -85,14 +85,16 @@ jobs:
         
         if [ -n "$INSTANCE_ID" ]; then
           echo "Found EC2 Node: $INSTANCE_ID"
+          # Base64 encode the script to bypass all AWS CLI quote-parsing issues
+          SCRIPT_B64=$(cat << 'EOF' | base64 -w 0
+          export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+          curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/k8s/config.yaml" | kubectl apply -f -
+          curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/k8s/api-deployment.yaml" | sed "s|:latest|:${{ github.sha }}|g" | kubectl apply -f -
+          curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/k8s/workers-deployment.yaml" | sed "s|:latest|:${{ github.sha }}|g" | kubectl apply -f -
+          EOF
+          )
           
-          # Fetch manifests from raw GitHub explicitly, replace SHA, and apply.
-          COMMAND="export KUBECONFIG=/etc/rancher/k3s/k3s.yaml && \
-          curl -sL https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/k8s/config.yaml | kubectl apply -f - && \
-          curl -sL https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/k8s/api-deployment.yaml | sed 's|:latest|:${{ github.sha }}|g' | kubectl apply -f - && \
-          curl -sL https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/k8s/workers-deployment.yaml | sed 's|:latest|:${{ github.sha }}|g' | kubectl apply -f -"
-          
-          COMMAND_ID=$(aws ssm send-command --instance-ids "$INSTANCE_ID" --document-name "AWS-RunShellScript" --parameters "commands=[$COMMAND]" --query "Command.CommandId" --output text)
+          COMMAND_ID=$(aws ssm send-command --instance-ids "$INSTANCE_ID" --document-name "AWS-RunShellScript" --parameters "commands=[echo $SCRIPT_B64 | base64 -d | bash]" --query "Command.CommandId" --output text)
           
           echo "Sent SSM Command: $COMMAND_ID. Waiting for it to run..."
           sleep 10
