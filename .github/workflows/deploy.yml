@@ -13,15 +13,15 @@ jobs:
     strategy:
       matrix:
         include:
-          - service: api-service
+          - service: api_service
             path: services/api_service
             platform: linux/arm64
             runner: ubuntu-24.04-arm
-          - service: stem-service
+          - service: stem_service
             path: services/stem_service
             platform: linux/amd64
             runner: ubuntu-latest
-          - service: midi-service
+          - service: midi_service
             path: services/midi_service
             platform: linux/amd64
             runner: ubuntu-latest
