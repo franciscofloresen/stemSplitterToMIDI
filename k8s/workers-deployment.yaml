@@ -1,10 +1,9 @@
 apiVersion: apps/v1
-kind: Deployment
+kind: DaemonSet
 metadata:
   name: stem-worker
   namespace: audio2midi
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: stem-worker
@@ -17,6 +16,8 @@ spec:
       - name: stem-worker
         image: rexby117/stem_service:latest
         imagePullPolicy: IfNotPresent
+      nodeSelector:
+        tier: worker
         env:
           - name: AWS_REGION
             valueFrom: { configMapKeyRef: { name: audio2midi-config, key: AWS_REGION } }
@@ -39,12 +40,11 @@ spec:
             memory: "2Gi"
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: DaemonSet
 metadata:
   name: midi-worker
   namespace: audio2midi
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: midi-worker
@@ -57,6 +57,8 @@ spec:
       - name: midi-worker
         image: rexby117/midi_service:latest
         imagePullPolicy: IfNotPresent
+      nodeSelector:
+        tier: worker
         env:
           - name: AWS_REGION
             valueFrom: { configMapKeyRef: { name: audio2midi-config, key: AWS_REGION } }

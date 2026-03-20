@@ -192,6 +192,14 @@ resource "aws_security_group" "k3s_sg" {
     cidr_blocks = [var.allowed_cidr]
   }
 
+  ingress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    self        = true
+    description = "Allow internal cluster communication"
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -200,7 +208,7 @@ resource "aws_security_group" "k3s_sg" {
   }
 }
 
-# --- 6. EC2 Instance (ARM-based Graviton for cost-effective memory) --- #
+# --- 6. EC2 Instance (Control Plane) --- #
 
 data "aws_ami" "ubuntu_arm64" {
   most_recent = true
@@ -212,22 +220,27 @@ data "aws_ami" "ubuntu_arm64" {
   }
 }
 
+resource "random_password" "k3s_token" {
+  length  = 32
+  special = false
+}
+
 resource "aws_instance" "k3s_node" {
   ami                    = data.aws_ami.ubuntu_arm64.id
-  instance_type          = "t4g.large"              # 8GB RAM, Graviton ARM64
+  instance_type          = "t4g.micro"              # Cheap 20/7 Control Plane
   key_name               = "audio2midi-key"
   iam_instance_profile   = aws_iam_instance_profile.worker_profile.name
   vpc_security_group_ids = [aws_security_group.k3s_sg.id]
 
   root_block_device {
-    volume_size = 50
+    volume_size = 20
     volume_type = "gp3"
   }
 
   user_data = <<-EOF
               #!/bin/bash
               PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
-              curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--tls-san $PUBLIC_IP" sh -
+              curl -sfL https://get.k3s.io | K3S_TOKEN=${random_password.k3s_token.result} INSTALL_K3S_EXEC="--tls-san $PUBLIC_IP" sh -
               export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
               chmod 644 /etc/rancher/k3s/k3s.yaml
               EOF
@@ -235,4 +248,97 @@ resource "aws_instance" "k3s_node" {
   tags = {
     Name = "${var.project_name}-node"
   }
+}
+
+# --- 7. Auto Scaling Group (Heavy AI Workers) --- #
+
+resource "aws_launch_template" "worker_nodes" {
+  name_prefix   = "${var.project_name}-worker-"
+  image_id      = data.aws_ami.ubuntu_arm64.id
+  instance_type = "t4g.large" # 8GB RAM Graviton
+  key_name      = "audio2midi-key"
+
+  iam_instance_profile {
+    name = aws_iam_instance_profile.worker_profile.name
+  }
+
+  vpc_security_group_ids = [aws_security_group.k3s_sg.id]
+
+  user_data = base64encode(<<-EOF
+              #!/bin/bash
+              curl -sfL https://get.k3s.io | K3S_URL=https://${aws_instance.k3s_node.private_ip}:6443 K3S_TOKEN=${random_password.k3s_token.result} sh -s - agent --node-label tier=worker
+              EOF
+  )
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name = "${var.project_name}-asg-worker"
+    }
+  }
+}
+
+resource "aws_autoscaling_group" "ai_workers" {
+  name                = "${var.project_name}-workers-asg"
+  availability_zones  = [aws_instance.k3s_node.availability_zone]
+  desired_capacity    = 0
+  min_size            = 0
+  max_size            = 5
+
+  launch_template {
+    id      = aws_launch_template.worker_nodes.id
+    version = "$Latest"
+  }
+}
+
+# --- 8. Auto Scaling Policies --- #
+
+resource "aws_autoscaling_policy" "scale_out" {
+  name                   = "sqs-scale-out"
+  scaling_adjustment     = 1
+  adjustment_type        = "ChangeInCapacity"
+  cooldown               = 120
+  autoscaling_group_name = aws_autoscaling_group.ai_workers.name
+}
+
+resource "aws_autoscaling_policy" "scale_in" {
+  name                   = "sqs-scale-in"
+  scaling_adjustment     = -1
+  adjustment_type        = "ChangeInCapacity"
+  cooldown               = 300
+  autoscaling_group_name = aws_autoscaling_group.ai_workers.name
+}
+
+resource "aws_cloudwatch_metric_alarm" "sqs_high" {
+  alarm_name          = "${var.project_name}-queue-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "1"
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  namespace           = "AWS/SQS"
+  period              = "60"
+  statistic           = "Maximum"
+  threshold           = "0"
+
+  dimensions = {
+    QueueName = aws_sqs_queue.stem_jobs.name
+  }
+
+  alarm_actions = [aws_autoscaling_policy.scale_out.arn]
+}
+
+resource "aws_cloudwatch_metric_alarm" "sqs_low" {
+  alarm_name          = "${var.project_name}-queue-low"
+  comparison_operator = "LessThanOrEqualToThreshold"
+  evaluation_periods  = "3"
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  namespace           = "AWS/SQS"
+  period              = "60"
+  statistic           = "Maximum"
+  threshold           = "0"
+
+  dimensions = {
+    QueueName = aws_sqs_queue.stem_jobs.name
+  }
+
+  alarm_actions = [aws_autoscaling_policy.scale_in.arn]
 }
