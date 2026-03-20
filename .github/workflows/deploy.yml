@@ -91,8 +91,8 @@ jobs:
           curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/k8s/config.yaml" | kubectl apply -f -
           curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/k8s/api-deployment.yaml" | sed "s|:latest|:${{ github.sha }}|g" | kubectl apply -f -
           curl -sL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/k8s/workers-deployment.yaml" | sed "s|:latest|:${{ github.sha }}|g" | kubectl apply -f -
-          EOF
-          )
+EOF
+)
           
           COMMAND_ID=$(aws ssm send-command --instance-ids "$INSTANCE_ID" --document-name "AWS-RunShellScript" --parameters "commands=[echo $SCRIPT_B64 | base64 -d | bash]" --query "Command.CommandId" --output text)
           
