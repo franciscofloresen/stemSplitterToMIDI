@@ -220,6 +220,16 @@ data "aws_ami" "ubuntu_arm64" {
   }
 }
 
+data "aws_ami" "ubuntu_gpu" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["Deep Learning Base OSS Nvidia Driver GPU AMI (Ubuntu 22.04)*"]
+  }
+}
+
 resource "random_password" "k3s_token" {
   length  = 32
   special = false
@@ -227,7 +237,7 @@ resource "random_password" "k3s_token" {
 
 resource "aws_instance" "k3s_node" {
   ami                    = data.aws_ami.ubuntu_arm64.id
-  instance_type          = "t4g.small"              # 2GB RAM Control Plane
+  instance_type          = "t4g.large"              # 8GB RAM Control Plane
   key_name               = "audio2midi-key"
   iam_instance_profile   = aws_iam_instance_profile.worker_profile.name
   vpc_security_group_ids = [aws_security_group.k3s_sg.id]
@@ -254,8 +264,8 @@ resource "aws_instance" "k3s_node" {
 
 resource "aws_launch_template" "worker_nodes" {
   name_prefix   = "${var.project_name}-worker-"
-  image_id      = data.aws_ami.ubuntu_arm64.id
-  instance_type = "t4g.large" # 8GB RAM Graviton
+  image_id      = data.aws_ami.ubuntu_gpu.id
+  instance_type = "g4dn.xlarge" # 16GB RAM NVIDIA T4 GPU
   key_name      = "audio2midi-key"
 
   iam_instance_profile {

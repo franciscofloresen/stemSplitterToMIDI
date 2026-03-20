@@ -8,18 +8,23 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     
     strategy:
       matrix:
-        service: [api-service, stem-service, midi-service]
         include:
           - service: api-service
             path: services/api_service
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
           - service: stem-service
             path: services/stem_service
+            platform: linux/amd64
+            runner: ubuntu-latest
           - service: midi-service
             path: services/midi_service
+            platform: linux/amd64
+            runner: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
@@ -41,7 +46,7 @@ jobs:
       uses: docker/build-push-action@v5
       with:
         context: ${{ matrix.path }}
-        platforms: linux/arm64
+        platforms: ${{ matrix.platform }}
         push: ${{ github.event_name != 'pull_request' }}
         tags: |
           rexby117/${{ matrix.service }}:latest
@@ -88,6 +93,7 @@ jobs:
           # Write the script directly to a file to bypass YAML/Bash EOF delimiter quirks
           echo "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml" > /tmp/deploy_script.sh
           echo "kubectl create namespace audio2midi --dry-run=client -o yaml | kubectl apply -f -" >> /tmp/deploy_script.sh
+          echo "kubectl apply -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.14.3/nvidia-device-plugin.yml" >> /tmp/deploy_script.sh
           echo "curl -sL \"https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/k8s/config.yaml\" | kubectl apply -f -" >> /tmp/deploy_script.sh
           echo "curl -sL \"https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/k8s/api-deployment.yaml\" | sed \"s|:latest|:${{ github.sha }}|g\" | kubectl apply -f -" >> /tmp/deploy_script.sh
           echo "curl -sL \"https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/k8s/workers-deployment.yaml\" | sed \"s|:latest|:${{ github.sha }}|g\" | kubectl apply -f -" >> /tmp/deploy_script.sh
