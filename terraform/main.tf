@@ -227,7 +227,7 @@ resource "random_password" "k3s_token" {
 
 resource "aws_instance" "k3s_node" {
   ami                    = data.aws_ami.ubuntu_arm64.id
-  instance_type          = "t4g.micro"              # Cheap 20/7 Control Plane
+  instance_type          = "t4g.small"              # 2GB RAM Control Plane
   key_name               = "audio2midi-key"
   iam_instance_profile   = aws_iam_instance_profile.worker_profile.name
   vpc_security_group_ids = [aws_security_group.k3s_sg.id]
