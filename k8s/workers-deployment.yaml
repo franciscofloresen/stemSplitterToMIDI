@@ -33,13 +33,11 @@ spec:
             value: "1"
         resources:
           limits:
-            cpu: "1500m"
-            memory: "3Gi"
-            nvidia.com/gpu: 1
+            cpu: "3500m"
+            memory: "10Gi"
           requests:
             cpu: "1000m"
-            memory: "2Gi"
-            nvidia.com/gpu: 1
+            memory: "3Gi"
 ---
 apiVersion: apps/v1
 kind: DaemonSet

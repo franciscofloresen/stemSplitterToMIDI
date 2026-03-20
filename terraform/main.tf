@@ -264,8 +264,8 @@ resource "aws_instance" "k3s_node" {
 
 resource "aws_launch_template" "worker_nodes" {
   name_prefix   = "${var.project_name}-worker-"
-  image_id      = data.aws_ami.ubuntu_gpu.id
-  instance_type = "g4dn.xlarge" # 16GB RAM NVIDIA T4 GPU
+  image_id      = data.aws_ami.ubuntu_arm64.id
+  instance_type = "t4g.xlarge" # 16GB RAM, 4 vCPU Graviton
   key_name      = "audio2midi-key"
 
   iam_instance_profile {
