@@ -87,6 +87,7 @@ jobs:
           echo "Found EC2 Node: $INSTANCE_ID"
           # Write the script directly to a file to bypass YAML/Bash EOF delimiter quirks
           echo "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml" > /tmp/deploy_script.sh
+          echo "kubectl create namespace audio2midi --dry-run=client -o yaml | kubectl apply -f -" >> /tmp/deploy_script.sh
           echo "curl -sL \"https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/k8s/config.yaml\" | kubectl apply -f -" >> /tmp/deploy_script.sh
           echo "curl -sL \"https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/k8s/api-deployment.yaml\" | sed \"s|:latest|:${{ github.sha }}|g\" | kubectl apply -f -" >> /tmp/deploy_script.sh
           echo "curl -sL \"https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/k8s/workers-deployment.yaml\" | sed \"s|:latest|:${{ github.sha }}|g\" | kubectl apply -f -" >> /tmp/deploy_script.sh
