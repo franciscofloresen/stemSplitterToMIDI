@@ -12,12 +12,12 @@ spec:
       labels:
         app: stem-worker
     spec:
+      nodeSelector:
+        tier: worker
       containers:
       - name: stem-worker
         image: rexby117/stem_service:latest
         imagePullPolicy: IfNotPresent
-      nodeSelector:
-        tier: worker
         env:
           - name: AWS_REGION
             valueFrom: { configMapKeyRef: { name: audio2midi-config, key: AWS_REGION } }
@@ -53,12 +53,12 @@ spec:
       labels:
         app: midi-worker
     spec:
+      nodeSelector:
+        tier: worker
       containers:
       - name: midi-worker
         image: rexby117/midi_service:latest
         imagePullPolicy: IfNotPresent
-      nodeSelector:
-        tier: worker
         env:
           - name: AWS_REGION
             valueFrom: { configMapKeyRef: { name: audio2midi-config, key: AWS_REGION } }
