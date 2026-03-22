@@ -4,13 +4,19 @@ import subprocess
 from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+import json
 
 app = FastAPI()
 
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 OUTPUT_BUCKET = os.getenv("S3_OUTPUT_BUCKET")
+MIDI_ENDPOINT_NAME = os.getenv("MIDI_ENDPOINT_NAME", "audio2midi-midi-endpoint")
+DYNAMODB_TABLE = os.getenv("DYNAMODB_TABLE", "audio2midi-jobs")
 
 s3 = boto3.client("s3", region_name=AWS_REGION)
+sagemaker_runtime = boto3.client("sagemaker-runtime", region_name=AWS_REGION)
+dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
+table = dynamodb.Table(DYNAMODB_TABLE)
 
 @app.get("/ping")
 def ping():
@@ -28,6 +34,13 @@ async def invocations(request: Request):
             return JSONResponse(content={"error": "Missing payload data"}, status_code=400)
             
         print(f"Processing Job: {job_id} | File: {s3_key}", flush=True)
+        table.update_item(
+            Key={'job_id': job_id},
+            UpdateExpression="set #s = :s",
+            ExpressionAttributeNames={'#s': 'status'},
+            ExpressionAttributeValues={':s': 'SPLITTING_STEMS'}
+        )
+
         local_input = f"/tmp/{job_id}_input"
         output_dir = f"/tmp/{job_id}_output"
         os.makedirs(output_dir, exist_ok=True)
@@ -43,6 +56,12 @@ async def invocations(request: Request):
         
         if result.returncode != 0:
             print(f"Demucs Error: {result.stderr[-500:]}", flush=True)
+            table.update_item(
+                Key={'job_id': job_id},
+                UpdateExpression="set #s = :s",
+                ExpressionAttributeNames={'#s': 'status'},
+                ExpressionAttributeValues={':s': 'ERROR'}
+            )
             return JSONResponse(content={"error": "Demucs failure"}, status_code=500)
             
         base_name = os.path.basename(local_input)
@@ -58,12 +77,37 @@ async def invocations(request: Request):
                 
         if os.path.exists(local_input): os.remove(local_input)
         
-        # Return success back to SageMaker logic hook
+        table.update_item(
+            Key={'job_id': job_id},
+            UpdateExpression="set #s = :s",
+            ExpressionAttributeNames={'#s': 'status'},
+            ExpressionAttributeValues={':s': 'STEMS_READY'}
+        )
+
+        # Trigger MIDI inference seamlessly
+        trigger_payload = {
+            "job_id": job_id,
+            "stems": uploaded_stems,
+            "input_bucket": OUTPUT_BUCKET
+        }
+        trigger_key = f"triggers/{job_id}_midi.json"
+        
+        s3.put_object(
+            Bucket=input_bucket,
+            Key=trigger_key,
+            Body=json.dumps(trigger_payload),
+            ContentType="application/json"
+        )
+
+        sagemaker_runtime.invoke_endpoint_async(
+            EndpointName=MIDI_ENDPOINT_NAME,
+            InputLocation=f"s3://{input_bucket}/{trigger_key}",
+            ContentType="application/json"
+        )
+        
         return JSONResponse(content={
             "job_id": job_id,
-            "status": "STEMS_READY", 
-            "stems": uploaded_stems,
-            "input_bucket": input_bucket
+            "status": "STEMS_READY"
         }, status_code=200)
         
     except Exception as e:

@@ -6,8 +6,14 @@ output "output_bucket_name" {
   value = aws_s3_bucket.output_midi.id
 }
 
-output "stem_ecr_repository" {
-  value = aws_ecr_repository.stem_service.repository_url
+output "dynamodb_table_name" {
+  description = "The name of the DynamoDB table for job status"
+  value       = aws_dynamodb_table.job_status.name
+}
+
+output "stem_repository_url" {
+  description = "URL of the ECR repository for the Stem service"
+  value       = aws_ecr_repository.stem_service.repository_url
 }
 
 output "midi_ecr_repository" {

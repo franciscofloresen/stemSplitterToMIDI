@@ -67,9 +67,25 @@ resource "aws_ecr_repository" "midi_service" {
   force_delete         = true
 }
 
-# --- 4. IAM (Least Privilege) --- #
+# --- 3. DynamoDB Table --- #
 
-# --- 3. IAM (Client API and SageMaker Execution) --- #
+resource "aws_dynamodb_table" "job_status" {
+  name         = "${var.project_name}-jobs"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "job_id"
+
+  attribute {
+    name = "job_id"
+    type = "S"
+  }
+
+  ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
+}
+
+# --- 4. IAM (Client API and SageMaker Execution) --- #
 
 resource "aws_iam_role" "api_role" {
   name = "${var.project_name}-api-role"
@@ -88,7 +104,7 @@ resource "aws_iam_role" "api_role" {
 
 resource "aws_iam_policy" "api_access" {
   name        = "${var.project_name}-api-policy"
-  description = "Allows API to hit SageMaker endpoints"
+  description = "Allows API to hit SageMaker endpoints and DynamoDB"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -105,6 +121,11 @@ resource "aws_iam_policy" "api_access" {
         Action   = ["sagemaker:InvokeEndpointAsync"]
         Effect   = "Allow"
         Resource = "*"
+      },
+      {
+        Action = ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:UpdateItem", "dynamodb:Query"]
+        Effect = "Allow"
+        Resource = aws_dynamodb_table.job_status.arn
       }
     ]
   })
@@ -239,7 +260,7 @@ resource "aws_iam_role" "sagemaker_execution_role" {
 
 resource "aws_iam_policy" "sagemaker_s3_policy" {
   name        = "${var.project_name}-sm-policy"
-  description = "Allows SageMaker to read inputs and write outputs seamlessly to S3"
+  description = "Allows SageMaker to read inputs and write outputs seamlessly to S3 and DynamoDB"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -263,6 +284,16 @@ resource "aws_iam_policy" "sagemaker_s3_policy" {
         Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
         Effect   = "Allow"
         Resource = "arn:aws:logs:*:*:log-group:/aws/sagemaker/*"
+      },
+      {
+        Action = ["dynamodb:UpdateItem", "dynamodb:PutItem", "dynamodb:GetItem"]
+        Effect = "Allow"
+        Resource = aws_dynamodb_table.job_status.arn
+      },
+      {
+        Action = ["sagemaker:InvokeEndpointAsync"]
+        Effect = "Allow"
+        Resource = "*"
       }
     ]
   })
@@ -273,110 +304,111 @@ resource "aws_iam_role_policy_attachment" "sm_attach" {
   policy_arn = aws_iam_policy.sagemaker_s3_policy.arn
 }
 
-# /* Temporarily disabled to avoid chicken-and-egg ECR image pulling errors
 # --- 6. SageMaker Endpoints (GPU Serverless) --- #
 
-# resource "aws_sagemaker_model" "stem_model" {
-#   name               = "${var.project_name}-stem-model"
-#   execution_role_arn = aws_iam_role.sagemaker_execution_role.arn
-#   primary_container {
-#     image = "${aws_ecr_repository.stem_service.repository_url}:latest"
-#     environment = {
-#       S3_OUTPUT_BUCKET = aws_s3_bucket.output_midi.bucket
-#     }
-#   }
-# }
+resource "aws_sagemaker_model" "stem_model" {
+  name               = "${var.project_name}-stem-model"
+  execution_role_arn = aws_iam_role.sagemaker_execution_role.arn
+  primary_container {
+    image = "${aws_ecr_repository.stem_service.repository_url}:latest"
+    environment = {
+      S3_OUTPUT_BUCKET = aws_s3_bucket.output_midi.bucket
+      MIDI_ENDPOINT_NAME = "${var.project_name}-midi-endpoint"
+      DYNAMODB_TABLE = aws_dynamodb_table.job_status.name
+    }
+  }
+}
 
-# resource "aws_sagemaker_model" "midi_model" {
-#   name               = "${var.project_name}-midi-model"
-#   execution_role_arn = aws_iam_role.sagemaker_execution_role.arn
-#   primary_container {
-#     image = "${aws_ecr_repository.midi_service.repository_url}:latest"
-#     environment = {
-#       S3_OUTPUT_BUCKET = aws_s3_bucket.output_midi.bucket
-#     }
-#   }
-# }
+resource "aws_sagemaker_model" "midi_model" {
+  name               = "${var.project_name}-midi-model"
+  execution_role_arn = aws_iam_role.sagemaker_execution_role.arn
+  primary_container {
+    image = "${aws_ecr_repository.midi_service.repository_url}:latest"
+    environment = {
+      S3_OUTPUT_BUCKET = aws_s3_bucket.output_midi.bucket
+      DYNAMODB_TABLE = aws_dynamodb_table.job_status.name
+    }
+  }
+}
 
-# resource "aws_sagemaker_endpoint_configuration" "stem_config" {
-#   name = "${var.project_name}-stem-config"
-#
-#   production_variants {
-#     variant_name           = "AllTraffic"
-#     model_name             = aws_sagemaker_model.stem_model.name
-#     initial_instance_count = 1
-#     instance_type          = "ml.g4dn.xlarge"
-#   }
-#
-#   async_inference_config {
-#     output_config {
-#       s3_output_path = "s3://${aws_s3_bucket.output_midi.bucket}/stems/"
-#     }
-#   }
-# }
+resource "aws_sagemaker_endpoint_configuration" "stem_config" {
+  name = "${var.project_name}-stem-config"
 
-# resource "aws_sagemaker_endpoint_configuration" "midi_config" {
-#   name = "${var.project_name}-midi-config"
-#
-#   production_variants {
-#     variant_name           = "AllTraffic"
-#     model_name             = aws_sagemaker_model.midi_model.name
-#     initial_instance_count = 1
-#     instance_type          = "ml.g4dn.xlarge"
-#   }
-#
-#   async_inference_config {
-#     output_config {
-#       s3_output_path = "s3://${aws_s3_bucket.output_midi.bucket}/midi/"
-#     }
-#   }
-# }
+  production_variants {
+    variant_name           = "AllTraffic"
+    model_name             = aws_sagemaker_model.stem_model.name
+    initial_instance_count = 1
+    instance_type          = "ml.g4dn.xlarge"
+  }
 
-# resource "aws_sagemaker_endpoint" "stem_endpoint" {
-#   name                 = "${var.project_name}-stem-endpoint"
-#   endpoint_config_name = aws_sagemaker_endpoint_configuration.stem_config.name
-# }
+  async_inference_config {
+    output_config {
+      s3_output_path = "s3://${aws_s3_bucket.output_midi.bucket}/stems/"
+    }
+  }
+}
 
-# resource "aws_sagemaker_endpoint" "midi_endpoint" {
-#   name                 = "${var.project_name}-midi-endpoint"
-#   endpoint_config_name = aws_sagemaker_endpoint_configuration.midi_config.name
-# }
+resource "aws_sagemaker_endpoint_configuration" "midi_config" {
+  name = "${var.project_name}-midi-config"
 
-# # Auto-Scale endpoints to 0
-# resource "aws_appautoscaling_target" "stem_target" {
-#   max_capacity       = 1
-#   min_capacity       = 0
-#   resource_id        = "endpoint/${aws_sagemaker_endpoint.stem_endpoint.name}/variant/AllTraffic"
-#   scalable_dimension = "sagemaker:variant:DesiredInstanceCount"
-#   service_namespace  = "sagemaker"
-# }
+  production_variants {
+    variant_name           = "AllTraffic"
+    model_name             = aws_sagemaker_model.midi_model.name
+    initial_instance_count = 1
+    instance_type          = "ml.g4dn.xlarge"
+  }
 
-# resource "aws_appautoscaling_target" "midi_target" {
-#   max_capacity       = 1
-#   min_capacity       = 0
-#   resource_id        = "endpoint/${aws_sagemaker_endpoint.midi_endpoint.name}/variant/AllTraffic"
-#   scalable_dimension = "sagemaker:variant:DesiredInstanceCount"
-#   service_namespace  = "sagemaker"
-# }
+  async_inference_config {
+    output_config {
+      s3_output_path = "s3://${aws_s3_bucket.output_midi.bucket}/midi/"
+    }
+  }
+}
 
-# resource "aws_appautoscaling_policy" "stem_scale" {
-#   name               = "stem-scale-policy"
-#   policy_type        = "TargetTrackingScaling"
-#   resource_id        = aws_appautoscaling_target.stem_target.resource_id
-#   scalable_dimension = aws_appautoscaling_target.stem_target.scalable_dimension
-#   service_namespace  = aws_appautoscaling_target.stem_target.service_namespace
-#
-#   target_tracking_scaling_policy_configuration {
-#     target_value = 1.0
-#     customized_metric_specification {
-#       metric_name = "ApproximateBacklogSizePerInstance"
-#       namespace   = "AWS/SageMaker"
-#       statistic   = "Average"
-#       dimensions {
-#         name  = "EndpointName"
-#         value = aws_sagemaker_endpoint.stem_endpoint.name
-#       }
-#     }
-#   }
-# }
-# */
+resource "aws_sagemaker_endpoint" "stem_endpoint" {
+  name                 = "${var.project_name}-stem-endpoint"
+  endpoint_config_name = aws_sagemaker_endpoint_configuration.stem_config.name
+}
+
+resource "aws_sagemaker_endpoint" "midi_endpoint" {
+  name                 = "${var.project_name}-midi-endpoint"
+  endpoint_config_name = aws_sagemaker_endpoint_configuration.midi_config.name
+}
+
+# Auto-Scale endpoints to 0
+resource "aws_appautoscaling_target" "stem_target" {
+  max_capacity       = 1
+  min_capacity       = 0
+  resource_id        = "endpoint/${aws_sagemaker_endpoint.stem_endpoint.name}/variant/AllTraffic"
+  scalable_dimension = "sagemaker:variant:DesiredInstanceCount"
+  service_namespace  = "sagemaker"
+}
+
+resource "aws_appautoscaling_target" "midi_target" {
+  max_capacity       = 1
+  min_capacity       = 0
+  resource_id        = "endpoint/${aws_sagemaker_endpoint.midi_endpoint.name}/variant/AllTraffic"
+  scalable_dimension = "sagemaker:variant:DesiredInstanceCount"
+  service_namespace  = "sagemaker"
+}
+
+resource "aws_appautoscaling_policy" "stem_scale" {
+  name               = "stem-scale-policy"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.stem_target.resource_id
+  scalable_dimension = aws_appautoscaling_target.stem_target.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.stem_target.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    target_value = 1.0
+    customized_metric_specification {
+      metric_name = "ApproximateBacklogSizePerInstance"
+      namespace   = "AWS/SageMaker"
+      statistic   = "Average"
+      dimensions {
+        name  = "EndpointName"
+        value = aws_sagemaker_endpoint.stem_endpoint.name
+      }
+    }
+  }
+}

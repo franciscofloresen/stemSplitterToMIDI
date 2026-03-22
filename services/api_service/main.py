@@ -21,12 +21,12 @@ app.add_middleware(
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 INPUT_BUCKET = os.getenv("INPUT_BUCKET")
 OUTPUT_BUCKET = os.getenv("OUTPUT_BUCKET", "audio2midi-output")
-STEM_QUEUE_URL = os.getenv("STEM_QUEUE_URL")
+STEM_ENDPOINT_NAME = os.getenv("STEM_ENDPOINT_NAME", "audio2midi-stem-endpoint")
 DYNAMODB_TABLE = os.getenv("DYNAMODB_TABLE", "audio2midi-jobs")
 
 # Clients
 s3 = boto3.client("s3", region_name=AWS_REGION)
-sqs = boto3.client("sqs", region_name=AWS_REGION)
+sagemaker_runtime = boto3.client("sagemaker-runtime", region_name=AWS_REGION)
 dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 table = dynamodb.Table(DYNAMODB_TABLE)
 
@@ -59,11 +59,10 @@ async def upload_audio(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to initialize job: {str(e)}")
 
-    # 2. Upload to S3
+    # 2. Upload Audio to S3
     try:
         s3.upload_fileobj(file.file, INPUT_BUCKET, s3_key)
     except Exception as e:
-        # Update status to error
         table.update_item(
             Key={'job_id': job_id},
             UpdateExpression="set #s = :s",
@@ -72,16 +71,31 @@ async def upload_audio(file: UploadFile = File(...)):
         )
         raise HTTPException(status_code=500, detail=f"Failed to upload to S3: {str(e)}")
 
-    # 3. Push to SQS
+    # 3. Create JSON payload trigger
+    import json
+    trigger_payload = {
+        "job_id": job_id,
+        "s3_key": s3_key,
+        "input_bucket": INPUT_BUCKET
+    }
+    trigger_key = f"triggers/{job_id}_stem.json"
+    
     try:
-        sqs.send_message(
-            QueueUrl=STEM_QUEUE_URL,
-            MessageAttributes={
-                'JobId': {'DataType': 'String', 'StringValue': job_id},
-                'S3Key': {'DataType': 'String', 'StringValue': s3_key},
-                'MessageType': {'DataType': 'String', 'StringValue': 'AUDIO_UPLOAD'}
-            },
-            MessageBody=f"Process new audio: {job_id}"
+        s3.put_object(
+            Bucket=INPUT_BUCKET,
+            Key=trigger_key,
+            Body=json.dumps(trigger_payload),
+            ContentType="application/json"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create SageMaker trigger: {str(e)}")
+
+    # 4. Invoke SageMaker Async Endpoint
+    try:
+        sagemaker_runtime.invoke_endpoint_async(
+            EndpointName=STEM_ENDPOINT_NAME,
+            InputLocation=f"s3://{INPUT_BUCKET}/{trigger_key}",
+            ContentType="application/json"
         )
     except Exception as e:
         table.update_item(
@@ -90,12 +104,12 @@ async def upload_audio(file: UploadFile = File(...)):
             ExpressionAttributeNames={'#s': 'status'},
             ExpressionAttributeValues={':s': 'ERROR'}
         )
-        raise HTTPException(status_code=500, detail=f"Failed to queue job: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to trigger inference: {str(e)}")
 
     return JobStatus(
         job_id=job_id,
         status="QUEUED",
-        message="File uploaded and job queued successfully."
+        message="File uploaded and inference queued successfully."
     )
 
 @app.get("/status/{job_id}")
