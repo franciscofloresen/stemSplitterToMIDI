@@ -3,59 +3,45 @@ import boto3
 from basic_pitch.inference import predict_and_save
 from basic_pitch import ICASSP_2022_MODEL_PATH
 from pathlib import Path
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+import shutil
 
-# Config
+app = FastAPI()
+
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-INPUT_BUCKET = os.getenv("INPUT_BUCKET")
-OUTPUT_BUCKET = os.getenv("OUTPUT_BUCKET")
-MIDI_QUEUE_URL = os.getenv("MIDI_QUEUE_URL")
-DYNAMODB_TABLE = os.getenv("DYNAMODB_TABLE", "audio2midi-jobs")
+OUTPUT_BUCKET = os.getenv("S3_OUTPUT_BUCKET")
 
-# Clients
 s3 = boto3.client("s3", region_name=AWS_REGION)
-sqs = boto3.client("sqs", region_name=AWS_REGION)
-dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
-table = dynamodb.Table(DYNAMODB_TABLE)
 
-def update_job_status(job_id, status):
+@app.get("/ping")
+def ping():
+    return JSONResponse(content={"status": "ok"}, status_code=200)
+
+@app.post("/invocations")
+async def invocations(request: Request):
     try:
-        table.update_item(
-            Key={'job_id': job_id},
-            UpdateExpression="set #s = :s",
-            ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={':s': status}
-        )
-    except Exception as e:
-        print(f"Failed to update DynamoDB for {job_id}: {e}", flush=True)
+        data = await request.json()
+        job_id = data.get("job_id")
+        stems = data.get("stems", {})
+        input_bucket = data.get("input_bucket")
+        
+        if not job_id or not stems or not input_bucket:
+            return JSONResponse(content={"error": "Missing payload data"}, status_code=400)
+            
+        print(f"MIDI Conversion for Job: {job_id}", flush=True)
 
-def process_message(message):
-    receipt_handle = message['ReceiptHandle']
-    attributes = message.get('MessageAttributes', {})
-    
-    msg_type = attributes.get('MessageType', {}).get('StringValue')
-    if msg_type != 'STEMS_READY':
-        return False
+        local_stems_dir = f"/tmp/{job_id}_stems"
+        local_midi_dir = f"/tmp/{job_id}_midi"
+        os.makedirs(local_stems_dir, exist_ok=True)
+        os.makedirs(local_midi_dir, exist_ok=True)
+        
+        uploaded_midis = {}
+        for stem_name, s3_stem_key in stems.items():
+            local_stem_path = f"{local_stems_dir}/{stem_name}"
+            s3.download_file(input_bucket, s3_stem_key, local_stem_path)
 
-    job_id = attributes.get('JobId', {}).get('StringValue')
-    if not job_id:
-        return False
-
-    print(f"MIDI Conversion for Job: {job_id}", flush=True)
-    update_job_status(job_id, "CONVERTING")
-
-    local_stems_dir = f"/tmp/{job_id}_stems"
-    local_midi_dir = f"/tmp/{job_id}_midi"
-    os.makedirs(local_stems_dir, exist_ok=True)
-    os.makedirs(local_midi_dir, exist_ok=True)
-
-    try:
-        stems_to_process = ["vocals.wav", "no_vocals.wav"]
-        for stem in stems_to_process:
-            s3_stem_key = f"stems/{job_id}/{stem}"
-            local_stem_path = f"{local_stems_dir}/{stem}"
-            s3.download_file(INPUT_BUCKET, s3_stem_key, local_stem_path)
-
-            print(f"Processing stem: {stem}", flush=True)
+            print(f"Processing stem: {stem_name}", flush=True)
             predict_and_save(
                 audio_path_list=[local_stem_path],
                 output_directory=local_midi_dir,
@@ -65,37 +51,21 @@ def process_message(message):
                 save_notes=False,
                 model_or_model_path=ICASSP_2022_MODEL_PATH
             )
-
+            
         for midi_file in Path(local_midi_dir).glob("*.mid"):
             s3_midi_key = f"outputs/{job_id}/{midi_file.name}"
             s3.upload_file(str(midi_file), OUTPUT_BUCKET, s3_midi_key)
-
-        update_job_status(job_id, "COMPLETED")
-        sqs.delete_message(QueueUrl=MIDI_QUEUE_URL, ReceiptHandle=receipt_handle)
-        return True
+            uploaded_midis[midi_file.name] = s3_midi_key
+            
+        shutil.rmtree(local_stems_dir, ignore_errors=True)
+        shutil.rmtree(local_midi_dir, ignore_errors=True)
+        
+        return JSONResponse(content={
+            "job_id": job_id,
+            "status": "COMPLETED", 
+            "midis": uploaded_midis
+        }, status_code=200)
 
     except Exception as e:
         print(f"Error converting {job_id} to MIDI: {str(e)}", flush=True)
-        update_job_status(job_id, "ERROR")
-        return False
-    finally:
-        import shutil
-        shutil.rmtree(local_stems_dir, ignore_errors=True)
-        shutil.rmtree(local_midi_dir, ignore_errors=True)
-
-def main():
-    print("MIDI Service Worker started. Polling SQS...", flush=True)
-    while True:
-        response = sqs.receive_message(
-            QueueUrl=MIDI_QUEUE_URL,
-            MaxNumberOfMessages=1,
-            WaitTimeSeconds=20,
-            MessageAttributeNames=['All']
-        )
-
-        messages = response.get('Messages', [])
-        for msg in messages:
-            process_message(msg)
-
-if __name__ == "__main__":
-    main()
+        return JSONResponse(content={"error": str(e)}, status_code=500)

@@ -2,3 +2,5 @@ demucs
 boto3
 torch
 numpy
+fastapi[standard]
+uvicorn

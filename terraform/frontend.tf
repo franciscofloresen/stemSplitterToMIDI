@@ -129,8 +129,8 @@ resource "aws_s3_bucket_policy" "allow_cloudfront" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid       = "AllowCloudFrontServicePrincipal"
-        Effect    = "Allow"
+        Sid    = "AllowCloudFrontServicePrincipal"
+        Effect = "Allow"
         Principal = {
           Service = "cloudfront.amazonaws.com"
         }
@@ -187,7 +187,7 @@ resource "aws_cloudwatch_metric_alarm" "cloudfront_errors" {
   period              = "300" # 5 mins
   statistic           = "Average"
   threshold           = "5" # 5% error rate
-  
+
   alarm_actions      = [aws_sns_topic.alerts.arn]
   treat_missing_data = "notBreaching"
 

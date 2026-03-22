@@ -6,17 +6,21 @@ output "output_bucket_name" {
   value = aws_s3_bucket.output_midi.id
 }
 
-output "stem_queue_url" {
-  value = aws_sqs_queue.stem_jobs.id
+output "stem_ecr_repository" {
+  value = aws_ecr_repository.stem_service.repository_url
 }
 
-output "midi_queue_url" {
-  value = aws_sqs_queue.midi_jobs.id
+output "midi_ecr_repository" {
+  value = aws_ecr_repository.midi_service.repository_url
 }
 
-output "dynamodb_table" {
-  value = aws_dynamodb_table.job_status.name
-}
+# output "stem_endpoint_name" {
+#   value = aws_sagemaker_endpoint.stem_endpoint.name
+# }
+
+# output "midi_endpoint_name" {
+#   value = aws_sagemaker_endpoint.midi_endpoint.name
+# }
 
 output "public_ip" {
   value = aws_instance.k3s_node.public_ip

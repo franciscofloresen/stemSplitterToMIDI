@@ -1,5 +1,8 @@
 basic-pitch
+tensorflow
 boto3
+fastapi[standard]
+uvicorn
 torch
 librosa
 numpy

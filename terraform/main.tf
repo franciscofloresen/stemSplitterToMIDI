@@ -53,56 +53,26 @@ resource "aws_s3_bucket_lifecycle_configuration" "cleanup" {
   }
 }
 
-# --- 2. SQS Queues (Decoupled Pipeline) --- #
+# --- 2. ECR Repositories (For SageMaker Containers) --- #
 
-resource "aws_sqs_queue" "stem_jobs_dlq" {
-  name = "${var.project_name}-stem-dlq"
+resource "aws_ecr_repository" "stem_service" {
+  name                 = "${var.project_name}-stem-service"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = true
 }
 
-resource "aws_sqs_queue" "stem_jobs" {
-  name                       = "${var.project_name}-stem-jobs"
-  visibility_timeout_seconds = 600 # 10 mins for heavy AI
-  redrive_policy = jsonencode({
-    deadLetterTargetArn = aws_sqs_queue.stem_jobs_dlq.arn
-    maxReceiveCount     = 3
-  })
-}
-
-resource "aws_sqs_queue" "midi_jobs_dlq" {
-  name = "${var.project_name}-midi-dlq"
-}
-
-resource "aws_sqs_queue" "midi_jobs" {
-  name                       = "${var.project_name}-midi-jobs"
-  visibility_timeout_seconds = 300
-  redrive_policy = jsonencode({
-    deadLetterTargetArn = aws_sqs_queue.midi_jobs_dlq.arn
-    maxReceiveCount     = 3
-  })
-}
-
-# --- 3. DynamoDB Table --- #
-
-resource "aws_dynamodb_table" "job_status" {
-  name         = "${var.project_name}-jobs"
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "job_id"
-
-  attribute {
-    name = "job_id"
-    type = "S"
-  }
-
-  ttl {
-    attribute_name = "ttl"
-    enabled        = true
-  }
+resource "aws_ecr_repository" "midi_service" {
+  name                 = "${var.project_name}-midi-service"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = true
 }
 
 # --- 4. IAM (Least Privilege) --- #
 
-resource "aws_iam_role" "worker_role" {
-  name = "${var.project_name}-worker-role"
+# --- 3. IAM (Client API and SageMaker Execution) --- #
+
+resource "aws_iam_role" "api_role" {
+  name = "${var.project_name}-api-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -116,53 +86,43 @@ resource "aws_iam_role" "worker_role" {
   })
 }
 
-resource "aws_iam_policy" "worker_access" {
-  name        = "${var.project_name}-worker-policy"
-  description = "Minimalist policy for audio2midi workers"
+resource "aws_iam_policy" "api_access" {
+  name        = "${var.project_name}-api-policy"
+  description = "Allows API to hit SageMaker endpoints"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Action = ["s3:GetObject", "s3:ListBucket", "s3:DeleteObject", "s3:PutObject"]
+        Action = ["s3:GetObject", "s3:PutObject"]
         Effect = "Allow"
         Resource = [
           aws_s3_bucket.input_audio.arn,
-          "${aws_s3_bucket.input_audio.arn}/*",
-          aws_s3_bucket.output_midi.arn,
-          "${aws_s3_bucket.output_midi.arn}/*"
+          "${aws_s3_bucket.input_audio.arn}/*"
         ]
       },
       {
-        Action = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:SendMessage", "sqs:GetQueueAttributes"]
-        Effect = "Allow"
-        Resource = [
-          aws_sqs_queue.stem_jobs.arn,
-          aws_sqs_queue.midi_jobs.arn
-        ]
-      },
-      {
-        Action = ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:UpdateItem", "dynamodb:Query"]
-        Effect = "Allow"
-        Resource = aws_dynamodb_table.job_status.arn
+        Action   = ["sagemaker:InvokeEndpointAsync"]
+        Effect   = "Allow"
+        Resource = "*"
       }
     ]
   })
 }
 
-resource "aws_iam_role_policy_attachment" "worker_attach" {
-  role       = aws_iam_role.worker_role.name
-  policy_arn = aws_iam_policy.worker_access.arn
+resource "aws_iam_role_policy_attachment" "api_attach" {
+  role       = aws_iam_role.api_role.name
+  policy_arn = aws_iam_policy.api_access.arn
 }
 
-resource "aws_iam_role_policy_attachment" "worker_ssm_attach" {
-  role       = aws_iam_role.worker_role.name
+resource "aws_iam_role_policy_attachment" "api_ssm_attach" {
+  role       = aws_iam_role.api_role.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-resource "aws_iam_instance_profile" "worker_profile" {
-  name = "${var.project_name}-worker-profile"
-  role = aws_iam_role.worker_role.name
+resource "aws_iam_instance_profile" "api_profile" {
+  name = "${var.project_name}-api-profile"
+  role = aws_iam_role.api_role.name
 }
 
 # --- 5. Networking & Security --- #
@@ -237,9 +197,9 @@ resource "random_password" "k3s_token" {
 
 resource "aws_instance" "k3s_node" {
   ami                    = data.aws_ami.ubuntu_arm64.id
-  instance_type          = "t4g.large"              # 8GB RAM Control Plane
+  instance_type          = "t4g.large" # 8GB RAM Control Plane
   key_name               = "audio2midi-key"
-  iam_instance_profile   = aws_iam_instance_profile.worker_profile.name
+  iam_instance_profile   = aws_iam_instance_profile.api_profile.name
   vpc_security_group_ids = [aws_security_group.k3s_sg.id]
 
   root_block_device {
@@ -260,95 +220,163 @@ resource "aws_instance" "k3s_node" {
   }
 }
 
-# --- 7. Auto Scaling Group (Heavy AI Workers) --- #
+# --- 5. SageMaker IAM Execution Role --- #
 
-resource "aws_launch_template" "worker_nodes" {
-  name_prefix   = "${var.project_name}-worker-"
-  image_id      = data.aws_ami.ubuntu_arm64.id
-  instance_type = "t4g.xlarge" # 16GB RAM, 4 vCPU Graviton
-  key_name      = "audio2midi-key"
+resource "aws_iam_role" "sagemaker_execution_role" {
+  name = "${var.project_name}-sagemaker-role"
 
-  iam_instance_profile {
-    name = aws_iam_instance_profile.worker_profile.name
-  }
-
-  vpc_security_group_ids = [aws_security_group.k3s_sg.id]
-
-  user_data = base64encode(<<-EOF
-              #!/bin/bash
-              curl -sfL https://get.k3s.io | K3S_URL=https://${aws_instance.k3s_node.private_ip}:6443 K3S_TOKEN=${random_password.k3s_token.result} sh -s - agent --node-label tier=worker
-              EOF
-  )
-
-  tag_specifications {
-    resource_type = "instance"
-    tags = {
-      Name = "${var.project_name}-asg-worker"
-    }
-  }
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "sagemaker.amazonaws.com"
+      }
+    }]
+  })
 }
 
-resource "aws_autoscaling_group" "ai_workers" {
-  name                = "${var.project_name}-workers-asg"
-  availability_zones  = [aws_instance.k3s_node.availability_zone]
-  desired_capacity    = 0
-  min_size            = 0
-  max_size            = 5
+resource "aws_iam_policy" "sagemaker_s3_policy" {
+  name        = "${var.project_name}-sm-policy"
+  description = "Allows SageMaker to read inputs and write outputs seamlessly to S3"
 
-  launch_template {
-    id      = aws_launch_template.worker_nodes.id
-    version = "$Latest"
-  }
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = ["s3:GetObject", "s3:PutObject", "s3:ListBucket"]
+        Effect = "Allow"
+        Resource = [
+          aws_s3_bucket.input_audio.arn,
+          "${aws_s3_bucket.input_audio.arn}/*",
+          aws_s3_bucket.output_midi.arn,
+          "${aws_s3_bucket.output_midi.arn}/*"
+        ]
+      },
+      {
+        Action   = ["ecr:GetAuthorizationToken", "ecr:BatchCheckLayerAvailability", "ecr:GetDownloadUrlForLayer", "ecr:BatchGetImage"]
+        Effect   = "Allow"
+        Resource = "*"
+      },
+      {
+        Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+        Effect   = "Allow"
+        Resource = "arn:aws:logs:*:*:log-group:/aws/sagemaker/*"
+      }
+    ]
+  })
 }
 
-# --- 8. Auto Scaling Policies --- #
-
-resource "aws_autoscaling_policy" "scale_out" {
-  name                   = "sqs-scale-out"
-  scaling_adjustment     = 1
-  adjustment_type        = "ChangeInCapacity"
-  cooldown               = 120
-  autoscaling_group_name = aws_autoscaling_group.ai_workers.name
+resource "aws_iam_role_policy_attachment" "sm_attach" {
+  role       = aws_iam_role.sagemaker_execution_role.name
+  policy_arn = aws_iam_policy.sagemaker_s3_policy.arn
 }
 
-resource "aws_autoscaling_policy" "scale_in" {
-  name                   = "sqs-scale-in"
-  scaling_adjustment     = -1
-  adjustment_type        = "ChangeInCapacity"
-  cooldown               = 300
-  autoscaling_group_name = aws_autoscaling_group.ai_workers.name
-}
+# /* Temporarily disabled to avoid chicken-and-egg ECR image pulling errors
+# --- 6. SageMaker Endpoints (GPU Serverless) --- #
 
-resource "aws_cloudwatch_metric_alarm" "sqs_high" {
-  alarm_name          = "${var.project_name}-queue-high"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "1"
-  metric_name         = "ApproximateNumberOfMessagesVisible"
-  namespace           = "AWS/SQS"
-  period              = "60"
-  statistic           = "Maximum"
-  threshold           = "0"
+# resource "aws_sagemaker_model" "stem_model" {
+#   name               = "${var.project_name}-stem-model"
+#   execution_role_arn = aws_iam_role.sagemaker_execution_role.arn
+#   primary_container {
+#     image = "${aws_ecr_repository.stem_service.repository_url}:latest"
+#     environment = {
+#       S3_OUTPUT_BUCKET = aws_s3_bucket.output_midi.bucket
+#     }
+#   }
+# }
 
-  dimensions = {
-    QueueName = aws_sqs_queue.stem_jobs.name
-  }
+# resource "aws_sagemaker_model" "midi_model" {
+#   name               = "${var.project_name}-midi-model"
+#   execution_role_arn = aws_iam_role.sagemaker_execution_role.arn
+#   primary_container {
+#     image = "${aws_ecr_repository.midi_service.repository_url}:latest"
+#     environment = {
+#       S3_OUTPUT_BUCKET = aws_s3_bucket.output_midi.bucket
+#     }
+#   }
+# }
 
-  alarm_actions = [aws_autoscaling_policy.scale_out.arn]
-}
+# resource "aws_sagemaker_endpoint_configuration" "stem_config" {
+#   name = "${var.project_name}-stem-config"
+#
+#   production_variants {
+#     variant_name           = "AllTraffic"
+#     model_name             = aws_sagemaker_model.stem_model.name
+#     initial_instance_count = 1
+#     instance_type          = "ml.g4dn.xlarge"
+#   }
+#
+#   async_inference_config {
+#     output_config {
+#       s3_output_path = "s3://${aws_s3_bucket.output_midi.bucket}/stems/"
+#     }
+#   }
+# }
 
-resource "aws_cloudwatch_metric_alarm" "sqs_low" {
-  alarm_name          = "${var.project_name}-queue-low"
-  comparison_operator = "LessThanOrEqualToThreshold"
-  evaluation_periods  = "3"
-  metric_name         = "ApproximateNumberOfMessagesVisible"
-  namespace           = "AWS/SQS"
-  period              = "60"
-  statistic           = "Maximum"
-  threshold           = "0"
+# resource "aws_sagemaker_endpoint_configuration" "midi_config" {
+#   name = "${var.project_name}-midi-config"
+#
+#   production_variants {
+#     variant_name           = "AllTraffic"
+#     model_name             = aws_sagemaker_model.midi_model.name
+#     initial_instance_count = 1
+#     instance_type          = "ml.g4dn.xlarge"
+#   }
+#
+#   async_inference_config {
+#     output_config {
+#       s3_output_path = "s3://${aws_s3_bucket.output_midi.bucket}/midi/"
+#     }
+#   }
+# }
 
-  dimensions = {
-    QueueName = aws_sqs_queue.stem_jobs.name
-  }
+# resource "aws_sagemaker_endpoint" "stem_endpoint" {
+#   name                 = "${var.project_name}-stem-endpoint"
+#   endpoint_config_name = aws_sagemaker_endpoint_configuration.stem_config.name
+# }
 
-  alarm_actions = [aws_autoscaling_policy.scale_in.arn]
-}
+# resource "aws_sagemaker_endpoint" "midi_endpoint" {
+#   name                 = "${var.project_name}-midi-endpoint"
+#   endpoint_config_name = aws_sagemaker_endpoint_configuration.midi_config.name
+# }
+
+# # Auto-Scale endpoints to 0
+# resource "aws_appautoscaling_target" "stem_target" {
+#   max_capacity       = 1
+#   min_capacity       = 0
+#   resource_id        = "endpoint/${aws_sagemaker_endpoint.stem_endpoint.name}/variant/AllTraffic"
+#   scalable_dimension = "sagemaker:variant:DesiredInstanceCount"
+#   service_namespace  = "sagemaker"
+# }
+
+# resource "aws_appautoscaling_target" "midi_target" {
+#   max_capacity       = 1
+#   min_capacity       = 0
+#   resource_id        = "endpoint/${aws_sagemaker_endpoint.midi_endpoint.name}/variant/AllTraffic"
+#   scalable_dimension = "sagemaker:variant:DesiredInstanceCount"
+#   service_namespace  = "sagemaker"
+# }
+
+# resource "aws_appautoscaling_policy" "stem_scale" {
+#   name               = "stem-scale-policy"
+#   policy_type        = "TargetTrackingScaling"
+#   resource_id        = aws_appautoscaling_target.stem_target.resource_id
+#   scalable_dimension = aws_appautoscaling_target.stem_target.scalable_dimension
+#   service_namespace  = aws_appautoscaling_target.stem_target.service_namespace
+#
+#   target_tracking_scaling_policy_configuration {
+#     target_value = 1.0
+#     customized_metric_specification {
+#       metric_name = "ApproximateBacklogSizePerInstance"
+#       namespace   = "AWS/SageMaker"
+#       statistic   = "Average"
+#       dimensions {
+#         name  = "EndpointName"
+#         value = aws_sagemaker_endpoint.stem_endpoint.name
+#       }
+#     }
+#   }
+# }
+# */
